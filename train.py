@@ -32,11 +32,10 @@ from typing import Optional, Union
 import datasets
 import evaluate
 import torch
-import pandas as pd
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
-from datasets import load_dataset, Features, Sequence, Value
+from datasets import load_dataset
 from huggingface_hub import Repository, create_repo
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -352,9 +351,7 @@ def main():
     # download the dataset.
     if "ntuadlhw1" in args.dataset_name:
         raw_datasets = load_dataset(args.dataset_name, data_files={'train':'train.json','valid':'valid.json'})
-
-        context_list = pd.read_json('context.json')
-        print(context_list[0][:3])
+        context_datasets = load_dataset(args.dataset_name, data_files={'context':'context.json'})
     elif args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
         raw_datasets = load_dataset(args.dataset_name, args.dataset_config_name)
@@ -379,6 +376,7 @@ def main():
         column_names = raw_datasets["valid"].column_names
 
     # When using your own dataset or a different dataset from swag, you will probably need to change this.
+    ending_names = [f"ending{i}" for i in range(4)]
     context_name = "paragraphs"
     question_header_name = "question"
     label_column_name = "relevant"
@@ -431,26 +429,21 @@ def main():
     padding = "max_length" if args.pad_to_max_length else False
 
     def preprocess_function(examples):
-        paragraphs = [[context_list[0][context] for context in contexts] for contexts in examples[context_name]]
-        questions = [examples[question_header_name] * 4]
-        labels = [examples[context_name][i].index(label) for i, label in enumerate(examples[label_column_name])]
-
-        if args.debug:
-            print('paragraphs')
-            print(paragraphs[:5])
-            print('question')
-            print(questions[:5])
-            print('label')
-            print(labels[:5])
+        first_sentences = [[context] * 4 for context in examples[context_name]]
+        question_headers = examples[question_header_name]
+        second_sentences = [
+            [f"{header} {examples[end][i]}" for end in ending_names] for i, header in enumerate(question_headers)
+        ]
+        labels = examples[label_column_name]
 
         # Flatten out
-        questions = list(chain(*questions))
-        paragraphs = list(chain(*paragraphs))
+        first_sentences = list(chain(*first_sentences))
+        second_sentences = list(chain(*second_sentences))
 
         # Tokenize
         tokenized_examples = tokenizer(
-            questions,
-            paragraphs,
+            first_sentences,
+            second_sentences,
             max_length=args.max_seq_length,
             padding=padding,
             truncation=True,
