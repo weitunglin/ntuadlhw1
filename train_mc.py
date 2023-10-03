@@ -432,25 +432,26 @@ def main():
 
     def preprocess_function(examples):
         paragraphs = [[context_list[0][context] for context in contexts] for contexts in examples[context_name]]
-        questions = [examples[question_header_name] * 4]
+        questions = [[question] * 4 for question in examples[question_header_name]]
         labels = [examples[context_name][i].index(label) for i, label in enumerate(examples[label_column_name])]
-
-        if args.debug:
-            print('paragraphs')
-            print(paragraphs[:5])
-            print('question')
-            print(questions[:5])
-            print('label')
-            print(labels[:5])
 
         # Flatten out
         questions = list(chain(*questions))
         paragraphs = list(chain(*paragraphs))
 
+        if args.debug:
+            num_samples_to_print = 5
+            print('paragraphs')
+            print(paragraphs[:num_samples_to_print * 4])
+            print('question')
+            print(questions[:num_samples_to_print * 4])
+            print('label')
+            print(labels[:num_samples_to_print])
+
         # Tokenize
         tokenized_examples = tokenizer(
-            questions,
             paragraphs,
+            questions,
             max_length=args.max_seq_length,
             padding=padding,
             truncation=True,
@@ -464,7 +465,6 @@ def main():
         processed_datasets = raw_datasets.map(
             preprocess_function, batched=True, remove_columns=raw_datasets["train"].column_names
         )
-
     train_dataset = processed_datasets["train"]
     eval_dataset = processed_datasets["valid"]
 
@@ -602,6 +602,7 @@ def main():
         model.train()
         if args.with_tracking:
             total_loss = 0
+            current_epoch_items = 0
         if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
@@ -623,6 +624,7 @@ def main():
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 completed_steps += 1
+                current_epoch_items += len(batch)
 
             if isinstance(checkpointing_steps, int):
                 if completed_steps % checkpointing_steps == 0:
@@ -630,6 +632,15 @@ def main():
                     if args.output_dir is not None:
                         output_dir = os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)
+
+            if completed_steps % 100 == 0 and args.with_tracking and current_epoch_items != 0:
+                accelerator.log(
+                    {
+                        "running_loss": total_loss.item() / current_epoch_items,
+                        "step": completed_steps,
+                    },
+                    step=completed_steps,
+                )
 
             if completed_steps >= args.max_train_steps:
                 break
