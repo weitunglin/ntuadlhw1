@@ -1,0 +1,4 @@
+*.json
+wandb/
+weitung8/
+__pycache__/
