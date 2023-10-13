@@ -31,6 +31,7 @@ import evaluate
 import numpy as np
 import pandas as pd
 import torch
+from torch import nn
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
@@ -467,6 +468,11 @@ def main():
         logger.info("Training new model from scratch")
         model = AutoModelForQuestionAnswering.from_config(config, trust_remote_code=args.trust_remote_code)
 
+    # model.qa_outputs = nn.Sequential(
+    #     nn.Linear(model.config.hidden_size, model.config.hidden_size * 2),
+    #     nn.Linear(model.config.hidden_size * 2, model.config.num_labels)
+    # )
+
     # Preprocessing the datasets.
     # Preprocessing is slighlty different for training and evaluation.
 
@@ -494,6 +500,7 @@ def main():
         # left whitespace
         examples[question_column_name] = [q.lstrip() for q in examples[question_column_name]]
         examples[context_column_name] = [context_list[0][i] for i in examples[context_column_name]]
+        # print(examples[context_column_name])
 
         # Tokenize our examples with truncation and maybe padding, but keep the overflows using a stride. This results
         # in one example possible giving several features when a context is long, each of those features having a
@@ -565,19 +572,34 @@ def main():
                 while sequence_ids[token_end_index] != (1 if pad_on_right else 0):
                     token_end_index -= 1
 
+                # print(token_start_index, token_end_index)
+                # print(offsets)
+
                 # Detect if the answer is out of the span (in which case this feature is labeled with the CLS index).
                 if not (offsets[token_start_index][0] <= start_char and offsets[token_end_index][1] >= end_char):
                     tokenized_examples["start_positions"].append(cls_index)
                     tokenized_examples["end_positions"].append(cls_index)
+                    # print('warning: adding cls_index')
                 else:
                     # Otherwise move the token_start_index and token_end_index to the two ends of the answer.
                     # Note: we could go after the last offset if the answer is the last word (edge case).
                     while token_start_index < len(offsets) and offsets[token_start_index][0] <= start_char:
                         token_start_index += 1
+                        # print(token_start_index)
                     tokenized_examples["start_positions"].append(token_start_index - 1)
+                    # print(token_start_index-1)
                     while offsets[token_end_index][1] >= end_char:
                         token_end_index -= 1
+                        # print(token_end_index)
+                    # print(token_start_index+1)
                     tokenized_examples["end_positions"].append(token_end_index + 1)
+
+                    # assert (token_start_index - 1) != (token_end_index + 1), f'tokenization error {answers} {start_char} {end_char} {sequence_ids}'
+            
+
+        # print('tokenized_examples["start_positions"]')
+        # print(tokenized_examples["start_positions"])
+        # print(tokenized_examples["end_positions"])
 
         return tokenized_examples
 
@@ -748,6 +770,7 @@ def main():
 
         key_remap = { "text": "text", "start": "answer_start" }
         references = [{"id": ex["id"], "answers": [{ key_remap[i]: ex[answer_column_name][i] for i in ex[answer_column_name] }]} for ex in examples]
+        # print(references[:3])
         return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
     metric = evaluate.load("squad_v2" if args.version_2_with_negative else "squad")
@@ -788,6 +811,17 @@ def main():
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
     no_decay = ["bias", "LayerNorm.weight"]
+
+    # print('named_parameters')
+    # for n, p in model.named_parameters():
+    #     print(n, p)
+
+    # print('parameters')
+    # for p in model.parameters():
+    #     print(p)
+    
+    # print('-' * 5)
+
     optimizer_grouped_parameters = [
         {
             "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
@@ -810,8 +844,8 @@ def main():
     lr_scheduler = get_scheduler(
         name=args.lr_scheduler_type,
         optimizer=optimizer,
-        num_warmup_steps=args.num_warmup_steps * args.gradient_accumulation_steps,
-        num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
+        num_warmup_steps=args.num_warmup_steps,
+        num_training_steps=args.max_train_steps,
     )
 
     # Prepare everything with our `accelerator`.
@@ -891,20 +925,23 @@ def main():
         model.train()
         if args.with_tracking:
             total_loss = 0
-            current_epoch_items = 0
         if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
             # We skip the first `n` batches in the dataloader when resuming from a checkpoint
             active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
+            if step == 0:
+                print('first batch of an epoch')
+                print(batch['start_positions'])
+                print(batch['end_positions'])
+
             with accelerator.accumulate(model):
                 outputs = model(**batch)
                 loss = outputs.loss
                 # We keep track of the loss at each epoch
                 if args.with_tracking:
                     total_loss += loss.detach().float()
-                    current_epoch_items += len(batch)
 
                 accelerator.backward(loss)
                 optimizer.step()
@@ -923,13 +960,15 @@ def main():
                         output_dir = os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)
 
-            if completed_steps % 100 == 0 and args.with_tracking and current_epoch_items != 0:          
+            if completed_steps % 10 == 0 and args.with_tracking and step != 0:          
                 accelerator.log(                                                                        
                     {
-                        "running_loss": total_loss.item() / current_epoch_items,
+                        "running_loss": loss.detach().float(),
                         "step": completed_steps,
+                        "lr0": lr_scheduler.get_last_lr()[0],
+                        "lr1": lr_scheduler.get_last_lr()[1],
                     },
-                    step=completed_steps,                                                               
+                    step=completed_steps,
                 )
 
             if completed_steps >= args.max_train_steps:
@@ -995,6 +1034,17 @@ def main():
             print(prediction.label_ids)
         eval_metric = metric.compute(predictions=prediction.predictions, references=prediction.label_ids)
         logger.info(f"Evaluation metrics: {eval_metric}")
+
+        if args.with_tracking:
+            accelerator.log(
+                {
+                    "exact_match": eval_metric["exact_match"],
+                    "f1": eval_metric["f1"],
+                    "epoch": epoch,
+                    "step": completed_steps,
+                },
+                step=completed_steps,
+            )
 
     # Prediction
     if args.do_predict:
