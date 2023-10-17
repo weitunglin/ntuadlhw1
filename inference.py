@@ -55,7 +55,7 @@ mc_model.to('cuda')
 mc_model.eval()
 
 mc_outputs = []
-for batch in test_dataloader:
+for batch in tqdm(test_dataloader):
     with torch.no_grad():
         batch = { i: batch[i].to('cuda') for i in batch }
         outputs = mc_model(**batch)
@@ -82,3 +82,4 @@ answer = qa_pipe(question=question, context=context)
 result = pd.DataFrame(data={'id':ids, 'answer':[i['answer'] for i in answer]})
 
 result.to_csv(output_file, index=False)
+
