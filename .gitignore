@@ -1,5 +1,6 @@
 *.json
 *.csv
+*.*local
 wandb/
 weitung8/
 __pycache__/

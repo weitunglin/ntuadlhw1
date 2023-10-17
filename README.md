@@ -26,3 +26,6 @@
 
 ```kaggle competitions submit -c ntuadl2023hw1 -f submission.csv -m "some message"```
 
+* multi-gpu training
+
+```TOKENIZERS_PARALLELISM=false accelerate launch train_qa.py --dataset_name weitung8/ntuadlhw1 --model_name_or_path hfl/chinese-roberta-wwm-ext-large --push_to_hub --hub_model_id weitung8/ntuadlhw1-question-answering --with_tracking --report_to wandb --max_seq_length 512 --per_device_train_batch_size 2 --per_device_eval_batch_size 2 --gradient_accumulation_steps 8 --output_dir weitung8/ntuadlhw1-question-answering --num_train_epochs 3 --learning_rate 8e-5 --checkpointing_steps epoch --lr_scheduler_type cosine --weight_decay 0.0001 --max_answer_length 60```
