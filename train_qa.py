@@ -310,6 +310,7 @@ def parse_args():
         ),
     )
     parser.add_argument("--debug", action="store_true", help="debug")
+    parser.add_argument("--in_training_validation_steps", default=None, type=int, help="in training validation steps")
     args = parser.parse_args()
 
     # Sanity checks
@@ -931,6 +932,7 @@ def main():
         else:
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
+            model.train()
             if step == 0:
                 print('first batch of an epoch')
                 print(batch['start_positions'])
@@ -973,6 +975,65 @@ def main():
 
             if completed_steps >= args.max_train_steps:
                 break
+
+            if args.in_training_validation_steps is not None and completed_steps % args.in_training_validation == 0:
+                # Evaluation
+                logger.info("***** Running Evaluation *****")
+                logger.info(f"  Num examples = {len(eval_dataset)}")
+                logger.info(f"  Batch size = {args.per_device_eval_batch_size}")
+
+                all_start_logits = []
+                all_end_logits = []
+                val_loss = 0
+    
+                model.eval()
+    
+                for step, batch in enumerate(eval_dataloader):
+                    with torch.no_grad():
+                        outputs = model(**batch)
+                        loss = outputs.loss
+                        val_loss += loss.detach().float()
+                        start_logits = outputs.start_logits
+                        end_logits = outputs.end_logits
+    
+                        if not args.pad_to_max_length:  # necessary to pad predictions and labels for being gathered
+                            start_logits = accelerator.pad_across_processes(start_logits, dim=1, pad_index=-100)
+                            end_logits = accelerator.pad_across_processes(end_logits, dim=1, pad_index=-100)
+    
+                        all_start_logits.append(accelerator.gather_for_metrics(start_logits).cpu().numpy())
+                        all_end_logits.append(accelerator.gather_for_metrics(end_logits).cpu().numpy())
+    
+                max_len = max([x.shape[1] for x in all_start_logits])  # Get the max_length of the tensor
+    
+                # concatenate the numpy array
+                start_logits_concat = create_and_fill_np_array(all_start_logits, eval_dataset, max_len)
+                end_logits_concat = create_and_fill_np_array(all_end_logits, eval_dataset, max_len)
+    
+                # delete the list of numpy arrays
+                del all_start_logits
+                del all_end_logits
+    
+                outputs_numpy = (start_logits_concat, end_logits_concat)
+                prediction = post_processing_function(eval_examples, eval_dataset, outputs_numpy)
+                if args.debug:
+                    print('prediction.predictions')
+                    print(prediction.predictions)
+                    print('prediction.label_ids')
+                    print(prediction.label_ids)
+                eval_metric = metric.compute(predictions=prediction.predictions, references=prediction.label_ids)
+                logger.info(f"Evaluation metrics: {eval_metric}")
+
+                if args.with_tracking:
+                    accelerator.log(
+                        {
+                            "exact_match": eval_metric["exact_match"],
+                            "val_loss": val_loss,
+                            "f1": eval_metric["f1"],
+                            "epoch": epoch,
+                            "step": completed_steps,
+                        },
+                        step=completed_steps,
+                    )
 
         if args.checkpointing_steps == "epoch":
             output_dir = f"epoch_{epoch}"
