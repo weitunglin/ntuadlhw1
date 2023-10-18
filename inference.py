@@ -2,7 +2,7 @@ import sys
 from itertools import chain
 from copy import deepcopy
 
-from transformers import AutoTokenizer, AutoModelForMultipleChoice, default_data_collator, pipeline
+from transformers import AutoTokenizer, AutoModelForMultipleChoice, AutoModelForQuestionAnswering, default_data_collator, pipeline
 from datasets import load_dataset
 import torch
 from torch.utils.data import DataLoader
@@ -12,6 +12,7 @@ from tqdm import tqdm
 padding = 'max_length' # "max_length" or "do_not_pad"
 max_seq_length = 512
 batch_size = 32
+debug = False
 
 context_file = sys.argv[1]
 test_file = sys.argv[2]
@@ -20,6 +21,9 @@ output_file = sys.argv[3]
 datasets = load_dataset('json', data_files={'test':test_file})
 context_list = pd.read_json(context_file)
 context_list = context_list[0]
+
+if debug:
+    datasets['test'] = datasets['test'].select(range(50))
 
 mc_tokenizer = AutoTokenizer.from_pretrained("weitung8/ntuadlhw1-multiple-choice", local_files_only=True)
 mc_model = AutoModelForMultipleChoice.from_pretrained("weitung8/ntuadlhw1-multiple-choice", local_files_only=True)
@@ -55,6 +59,7 @@ mc_model.to('cuda')
 mc_model.eval()
 
 mc_outputs = []
+print('Running multiple choice:')
 for batch in tqdm(test_dataloader):
     with torch.no_grad():
         batch = { i: batch[i].to('cuda') for i in batch }
@@ -73,8 +78,12 @@ ids = test_dataset['id']
 # print(context[:3])
 # print(question[:3])
 
-qa_pipe = pipeline("question-answering", model="weitung8/ntuadlhw1-question-answering", device=0)
+qa_tokenizer = AutoTokenizer.from_pretrained("weitung8/ntuadlhw1-question-answering", local_files_only=True)
+qa_model = AutoModelForQuestionAnswering.from_pretrained("weitung8/ntuadlhw1-question-answering", local_files_only=True)
 
+qa_pipe = pipeline("question-answering", model=qa_model, tokenizer=qa_tokenizer, device=0)
+
+print('Running question answering:')
 answer = qa_pipe(question=question, context=context)
 
 # print(answer[:3])
