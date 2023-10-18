@@ -7,6 +7,7 @@
 ```bash ./download.sh```
 
 * run inference
+
 ```bash ./run.sh context.json test.json submission.csv```
 
 
