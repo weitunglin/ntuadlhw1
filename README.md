@@ -1,5 +1,15 @@
 # ntuadlhw1
 
+## inference steps
+
+* download datasets and models
+
+```bash ./download.sh```
+
+* run inference
+```bash ./run.sh context.json test.json submission.csv```
+
+
 ## experiments steps
 
 * install requirements
