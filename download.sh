@@ -8,7 +8,6 @@ curl -L -o 'context.json' 'https://huggingface.co/datasets/weitung8/ntuadlhw1/re
 mkdir -p weitung8/ntuadlhw1-multiple-choice/
 mkdir -p weitung8/ntuadlhw1-question-answering/
 
-curl -L -o 'weitung8/ntuadlhw1-multiple-choice/added_tokens.json' 'https://huggingface.co/weitung8/ntuadlhw1-multiple-choice/resolve/main/added_tokens.json'
 curl -L -o 'weitung8/ntuadlhw1-multiple-choice/config.json' 'https://huggingface.co/weitung8/ntuadlhw1-multiple-choice/resolve/main/config.json'
 curl -L -o 'weitung8/ntuadlhw1-multiple-choice/pytorch_model.bin' 'https://huggingface.co/weitung8/ntuadlhw1-multiple-choice/resolve/main/pytorch_model.bin'
 curl -L -o 'weitung8/ntuadlhw1-multiple-choice/speical_tokens_map.json' 'https://huggingface.co/weitung8/ntuadlhw1-multiple-choice/resolve/main/speical_tokens_map.json'
